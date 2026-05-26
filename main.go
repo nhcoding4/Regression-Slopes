@@ -18,6 +18,10 @@ import (
 	"gonum.org/v1/plot/vg/vgimg"
 )
 
+// ------------------------------------------------------------------------------------------------
+// Helpers
+// ------------------------------------------------------------------------------------------------
+
 func createData(slope float64, size int) ([]float64, []float64) {
 	xValues := nn.RandNormArray(size)
 	yValues := nn.RandNormArray(size)
@@ -27,61 +31,6 @@ func createData(slope float64, size int) ([]float64, []float64) {
 	}
 
 	return xValues, yValues
-}
-
-func valuesToFloats(values []*nn.Value) []float64 {
-	result := make([]float64, len(values))
-
-	for i, val := range values {
-		result[i] = val.Data
-	}
-
-	return result
-}
-
-func trainModel(x, y []float64) ([]float64, []float64) {
-	const lr = 0.05
-	const epochs = 500
-	expected := y
-
-	// The first number must match the size of input array into network
-	n := nn.NewMLP(1, []int{1, 1}) // Shape of layers, If last != 0 then change the indexing and result storage below
-	mlpParams := nn.GetMLPParams(n)
-	results := make([]*nn.Value, len(x)) // Here
-	losses := make([]float64, epochs)
-
-	for i := range epochs {
-		for j, val := range x {
-			results[j] = nn.ForwardProp(n, []float64{val})[0] // and here
-		}
-
-		msq := nn.MeanSquaredError(expected, results)
-		losses[i] = msq.Data
-		// Backward Prop
-		for _, param := range mlpParams {
-			param.Gradient = 0.0
-		}
-		nn.ValueBackwardPropagate(msq)
-
-		// Update
-		for _, param := range mlpParams {
-			param.Data += -lr * param.Gradient
-		}
-	}
-
-	return valuesToFloats(results), losses
-}
-
-func getColumn(data [][][]float64, column int) []float64 {
-	results := []float64{}
-
-	for _, row := range data {
-		for _, col := range row {
-			results = append(results, col[column])
-		}
-	}
-
-	return results
 }
 
 func getExperimentData(data [][]float64, column int) []float64 {
@@ -104,46 +53,22 @@ func mean(data []float64) float64 {
 	return sum / float64(len(data))
 }
 
-func runExperiments(experiments int) {
-	start := time.Now()
+func valuesToFloats(values []*nn.Value) []float64 {
+	result := make([]float64, len(values))
 
-	slopes := nn.Linspace(-2, 2, 21, true)
-	results := make([][][]float64, len(slopes))
-
-	for i := range results {
-		results[i] = make([][]float64, experiments)
-		for j := range experiments {
-			results[i][j] = make([]float64, 2)
-		}
+	for i, val := range values {
+		result[i] = val.Data
 	}
 
-	var wg sync.WaitGroup
+	return result
+}
 
-	for i := range len(slopes) {
-		wg.Go(func() {
-			for j := range experiments {
-				x, y := createData(slopes[i], 50)
-				yhat, losses := trainModel(x, y)
-				results[i][j][0] = losses[len(losses)-1]
-				results[i][j][1] = stat.Correlation(y, yhat, nil)
-			}
-		})
-	}
-	wg.Wait()
+// ------------------------------------------------------------------------------------------------
+// Plotting
+// ------------------------------------------------------------------------------------------------
 
-	for y, row := range results {
-		for x, col := range row {
-			for z, num := range col {
-				if math.IsNaN(num) {
-					results[y][x][z] = 0
-				}
-			}
-		}
-	}
-
-	end := time.Since(start)
-	fmt.Printf("%d experiments took %v\n", experiments, end)
-
+func plotResults(slopes []float64, results [][][]float64, savePath string) {
+	// Convert Data to something the plotting lib understands.
 	lossMeans := plotter.XYs{}
 	corrcoefMeans := plotter.XYs{}
 
@@ -175,7 +100,7 @@ func runExperiments(experiments int) {
 
 	lossPlot.Add(line, scatter)
 
-	// Plot Model Performance
+	// Plot model performance
 	perfPlot := plot.New()
 	subplots = append(subplots, perfPlot)
 	perfPlot.Title.Text = "Model Performance"
@@ -197,6 +122,7 @@ func runExperiments(experiments int) {
 
 	plots[0] = subplots
 
+	// Create plot and save
 	img := vgimg.New(vg.Inch*20, vg.Inch*10)
 	drawCanvas := draw.New(img)
 	tiles := draw.Tiles{Rows: 1, Cols: 2}
@@ -208,7 +134,7 @@ func runExperiments(experiments int) {
 		}
 	}
 
-	writer, err := os.Create("results.png")
+	writer, err := os.Create(fmt.Sprintf("%s.png", savePath))
 	if err != nil {
 		panic(err)
 	}
@@ -219,6 +145,95 @@ func runExperiments(experiments int) {
 	}
 }
 
-func main() {
-	runExperiments(50)
+// ------------------------------------------------------------------------------------------------
+// Training
+// ------------------------------------------------------------------------------------------------
+
+func trainModel(x, y []float64, learningRate float64, epochs int) ([]float64, []float64) {
+	expected := y
+
+	// The first number must match the size of input array into network
+	n := nn.NewMLP(1, []int{1, 1}) // Shape of layers, If last != 0 then change the indexing and result storage below
+	mlpParams := nn.GetMLPParams(n)
+	results := make([]*nn.Value, len(x)) // Here
+	losses := make([]float64, epochs)
+
+	for i := range epochs {
+		for j, val := range x {
+			results[j] = nn.ForwardProp(n, []float64{val})[0] // and here
+		}
+
+		msq := nn.MeanSquaredError(expected, results)
+		losses[i] = msq.Data
+
+		// Backward Prop
+		for _, param := range mlpParams {
+			param.Gradient = 0.0
+		}
+		nn.ValueBackwardPropagate(msq)
+
+		// Update
+		for _, param := range mlpParams {
+			param.Data += -learningRate * param.Gradient
+		}
+	}
+
+	return valuesToFloats(results), losses
 }
+
+func runExperiments(experiments, epochs int, learingRate float64) ([]float64, [][][]float64) {
+	start := time.Now()
+
+	slopes := nn.Linspace(-2, 2, 21, true)
+	results := make([][][]float64, len(slopes))
+
+	for i := range results {
+		results[i] = make([][]float64, experiments)
+		for j := range experiments {
+			results[i][j] = make([]float64, 2)
+		}
+	}
+
+	var wg sync.WaitGroup
+
+	for i := range len(slopes) {
+		wg.Go(func() {
+			for j := range experiments {
+				x, y := createData(slopes[i], 50)
+				yhat, losses := trainModel(x, y, learingRate, epochs)
+				results[i][j][0] = losses[len(losses)-1]
+				results[i][j][1] = stat.Correlation(y, yhat, nil)
+			}
+		})
+	}
+	wg.Wait()
+
+	for y, row := range results {
+		for x, col := range row {
+			for z, num := range col {
+				if math.IsNaN(num) {
+					results[y][x][z] = 0
+				}
+			}
+		}
+	}
+
+	end := time.Since(start)
+	fmt.Printf("%d experiments took %v\n", experiments, end)
+
+	return slopes, results
+}
+
+// ------------------------------------------------------------------------------------------------
+
+func main() {
+	const totalExperiments = 50
+	const learningRate = 0.05
+	const epochs = 500
+	const savePath = "results"
+
+	slopes, results := runExperiments(totalExperiments, epochs, learningRate)
+	plotResults(slopes, results, savePath)
+}
+
+// ------------------------------------------------------------------------------------------------
