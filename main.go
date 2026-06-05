@@ -34,7 +34,6 @@ func trainModel(x, y []float64) ([]float64, []float64) {
 	const epochs = 500
 	expected := y
 
-	// The first number must match the size of input array into network
 	g := nn.NewGraph()
 	results := make([]int, len(x)) // Here
 	losses := make([]float64, epochs)
