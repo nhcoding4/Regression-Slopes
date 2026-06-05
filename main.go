@@ -29,16 +29,6 @@ func createData(slope float64, size int) ([]float64, []float64) {
 	return xValues, yValues
 }
 
-func valuesToFloats(values []*nn.Value) []float64 {
-	result := make([]float64, len(values))
-
-	for i, val := range values {
-		result[i] = val.Data
-	}
-
-	return result
-}
-
 func trainModel(x, y []float64) ([]float64, []float64) {
 	const lr = 0.05
 	const epochs = 500
